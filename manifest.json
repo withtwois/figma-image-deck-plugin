@@ -1,0 +1,14 @@
+{
+  "name": "Image deck",
+  "id": "dac2ca8c-314e-4d0b-a3f0-5f213f1cecbe",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "relaunchButtons": [
+    {
+      "command": "dac2ca8c-314e-4d0b-a3f0-5f213f1cecbe",
+      "name": "Image deck"
+    }
+  ]
+}

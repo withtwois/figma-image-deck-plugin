@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+  <script>
+    try {
+      window.localStorage.getItem('x')
+    } catch (e) {
+      const store = new Map()
+      const shim = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => { store.set(k, String(v)) },
+        removeItem: (k) => { store.delete(k) },
+        clear: () => { store.clear() },
+        key: (i) => Array.from(store.keys())[i] ?? null,
+        get length() { return store.size },
+      }
+      Object.defineProperty(window, 'localStorage', { value: shim, configurable: true })
+    }
+  </script>
+  <style>
+    html, body { margin: 0; padding: 0; height: auto; min-height: 0; }
+    #plugin-root { height: auto; }
+    body { display: block; }
+    dialog.fig-fill-picker-dialog {
+      width: 300px; max-width: 300px; min-width: 300px;
+      max-height: none; height: max-content;
+    }
+    .deck-area {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 20px 16px 16px; gap: 12px;
+      background: var(--figma-color-bg-secondary);
+      border-bottom: 1px solid var(--figma-color-border);
+    }
+    .deck-visual { position: relative; width: 100px; height: 70px; margin-bottom: 4px; }
+    .card {
+      position: absolute; width: 100px; height: 70px; border-radius: 6px;
+      background: var(--figma-color-bg); border: 1px solid var(--figma-color-border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+    .card-3 { transform: rotate(-4deg) translate(-3px, 3px); background: var(--figma-color-bg-secondary); }
+    .card-2 { transform: rotate(-2deg) translate(-1px, 1px); }
+    .card-1 {
+      background: linear-gradient(135deg, var(--figma-color-bg-brand) 0%, #7B61FF 100%);
+      border-color: transparent;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .card-1-inner {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: rgba(255,255,255,0.2);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .deck-empty .card-1 { background: var(--figma-color-bg-tertiary, #f5f5f5); border: 2px dashed var(--figma-color-border); }
+    .deck-empty .card-2, .deck-empty .card-3 { opacity: 0; }
+    .deck-count { font-family: var(--font-family, Inter, sans-serif); font-size: 11px; color: var(--figma-color-text-secondary); text-align: center; }
+    .deck-count strong { color: var(--figma-color-text); font-weight: 600; }
+    .done-all { font-family: var(--font-family, Inter, sans-serif); font-size: 11px; color: var(--figma-color-text-secondary); text-align: center; }
+    .upload-area { padding: 8px 12px 4px; border-bottom: 1px solid var(--figma-color-border); }
+    .image-list { padding: 0 12px 4px; max-height: 110px; overflow-y: auto; }
+    .image-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-family: var(--font-family, Inter, sans-serif); font-size: 11px; border-bottom: 1px solid var(--figma-color-border); }
+    .image-item:last-child { border-bottom: none; }
+    .image-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--figma-color-bg-brand); }
+    .image-dot.used { background: var(--figma-color-border); }
+    .image-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--figma-color-text); }
+    .image-name.used { color: var(--figma-color-text-secondary); text-decoration: line-through; }
+    .footer-actions { display: flex; gap: 8px; width: 100%; }
+    .footer-actions fig-button:first-child { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="plugin-root">
+    <div class="deck-area">
+      <div class="deck-visual" id="deck-visual">
+        <div class="card card-3"></div>
+        <div class="card card-2"></div>
+        <div class="card card-1" id="card-top">
+          <div class="card-1-inner">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M9 3v12M3 9h12" stroke="white" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="deck-count" id="deck-count"><strong id="remaining-count">0</strong> of <span id="total-count">0</span> remaining</div>
+      <div class="done-all" id="done-all" style="display:none">All images drawn</div>
+    </div>
+    <div class="upload-area">
+      <input type="file" id="file-input" accept="image/*" multiple style="display:none">
+      <fig-button id="add-btn" full>+ Add images</fig-button>
+    </div>
+    <div class="image-list" id="image-list" style="display:none"></div>
+    <fig-footer>
+      <div class="footer-actions">
+        <fig-button id="draw-btn" type="submit" disabled>Draw card</fig-button>
+        <fig-button id="reset-btn" disabled>Reset</fig-button>
+      </div>
+    </fig-footer>
+  </div>
+  <script>
+    let lastReportedHeight = 0, resizeRaf = 0
+    function measurePanelHeight() {
+      const root = document.getElementById('plugin-root')
+      if (!root) return 0
+      let h = Math.ceil(root.getBoundingClientRect().height)
+      const d = document.querySelector('dialog.fig-fill-picker-dialog[open]')
+      if (d) h = Math.max(h, Math.ceil(d.getBoundingClientRect().bottom))
+      return h
+    }
+    function reportHeight() {
+      const h = measurePanelHeight()
+      if (h && h !== lastReportedHeight) { lastReportedHeight = h; parent.postMessage({ pluginMessage: { type: 'resize', height: h } }, '*') }
+    }
+    const pluginRoot = document.getElementById('plugin-root')
+    if (pluginRoot && typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => { if (resizeRaf) cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(reportHeight) }).observe(pluginRoot)
+    }
+    new MutationObserver(() => { if (resizeRaf) cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(reportHeight) }).observe(document.body, { childList: true, attributes: true, attributeFilter: ['open','disabled','style'], subtree: true })
+    window.addEventListener('message', (event) => {
+      const msg = event.data && event.data.pluginMessage
+      if (!msg || msg.type !== 'deck-state') return
+      const { total, remaining, images } = msg
+      const allUsed = total > 0 && remaining === 0
+      document.getElementById('remaining-count').textContent = String(remaining)
+      document.getElementById('total-count').textContent = String(total)
+      document.getElementById('done-all').style.display = allUsed ? 'block' : 'none'
+      document.getElementById('deck-count').style.display = allUsed ? 'none' : 'block'
+      const dv = document.getElementById('deck-visual')
+      if (total === 0) dv.classList.add('deck-empty'); else dv.classList.remove('deck-empty')
+      const ct = document.getElementById('card-top')
+      if (allUsed) { ct.style.background = 'var(--figma-color-bg-tertiary,#f5f5f5)'; ct.style.border = '2px dashed var(--figma-color-border)' }
+      else if (total > 0) { ct.style.background = 'linear-gradient(135deg,var(--figma-color-bg-brand) 0%,#7B61FF 100%)'; ct.style.border = 'none' }
+      const listEl = document.getElementById('image-list')
+      if (images && images.length > 0) {
+        listEl.style.display = 'block'
+        listEl.innerHTML = images.map(img => `<div class="image-item"><div class="image-dot ${img.used?'used':''}"></div><span class="image-name ${img.used?'used':''}">${escapeHtml(img.name.replace(/\.[^.]+$/,''))}</span></div>`).join('')
+      } else { listEl.style.display = 'none'; listEl.innerHTML = '' }
+      if (remaining > 0) document.getElementById('draw-btn').removeAttribute('disabled'); else document.getElementById('draw-btn').setAttribute('disabled','')
+      if (total > 0) document.getElementById('reset-btn').removeAttribute('disabled'); else document.getElementById('reset-btn').setAttribute('disabled','')
+    })
+    function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') }
+    document.getElementById('add-btn').addEventListener('click', () => document.getElementById('file-input').click())
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || [])
+      if (!files.length) return
+      const imageFiles = []
+      for (const file of files) { const buf = await file.arrayBuffer(); imageFiles.push({ bytes: Array.from(new Uint8Array(buf)), name: file.name }) }
+      parent.postMessage({ pluginMessage: { type: 'add-images', images: imageFiles } }, '*')
+      e.target.value = ''
+    })
+    document.getElementById('draw-btn').addEventListener('click', () => parent.postMessage({ pluginMessage: { type: 'draw' } }, '*'))
+    document.getElementById('reset-btn').addEventListener('click', () => parent.postMessage({ pluginMessage: { type: 'reset' } }, '*'))
+  </script>
+</body>
+</html>
